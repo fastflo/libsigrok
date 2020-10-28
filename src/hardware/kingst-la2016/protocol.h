@@ -47,41 +47,56 @@
 #define LA2016_NUM_SAMPLES_MIN  256
 #define LA2016_NUM_SAMPLES_MAX  (10UL * 1000 * 1000 * 1000)
 
+/*
+ * stolen from src/dmm/eev121gw.c:
+ * Support compile time checks for expected sizeof() results etc, like
+ *   STATIC_ASSERT(sizeof(struct packet) == 19, "packet size");
+ * Probably should go to some common location.
+ * See http://www.pixelbeat.org/programming/gcc/static_assert.html for details.
+ */
+#define ASSERT_CONCAT_(a, b) a ## b
+#define ASSERT_CONCAT(a, b) ASSERT_CONCAT_(a, b)
+/* These can't be used after statements in c89. */
+#ifdef __COUNTER__
+  #define STATIC_ASSERT(e, m) \
+    ; enum { ASSERT_CONCAT(static_assert_, __COUNTER__) = 1 / (int)(!!(e)) }
+#else
+  /*
+   * This can't be used twice on the same line so ensure if using in headers
+   * that the headers are not included twice (by wrapping in #ifndef...#endif).
+   * Note it doesn't cause an issue when used on same line of separate modules
+   * compiled with gcc -combine -fwhole-program.
+   */
+  #define STATIC_ASSERT(e, m) \
+    ; enum { ASSERT_CONCAT(assert_line_, __LINE__) = 1 / (int)(!!(e)) }
+#endif
+
+#define STATIC_ASSERT_SIZEOF(type, size) \
+	STATIC_ASSERT(sizeof(type) == (size), "unexpected struct packing!")
+
 typedef struct pwm_setting_dev {
 	uint32_t period;
 	uint32_t duty;
-} __attribute__((__packed__)) pwm_setting_dev_t;
+} pwm_setting_dev_t;
+STATIC_ASSERT_SIZEOF(pwm_setting_dev_t, 2 * 4);
 
 typedef struct trigger_cfg {
 	uint32_t channels;
 	uint32_t enabled;
 	uint32_t level;
 	uint32_t high_or_falling;
-} __attribute__((__packed__)) trigger_cfg_t;
-
-typedef struct sample_config {
-	uint32_t sample_depth;
-	uint32_t psa;
-	uint16_t u1;
-	uint32_t u2;
-	uint16_t clock_divisor;
-} __attribute__((__packed__)) sample_config_t;
+} trigger_cfg_t;
+STATIC_ASSERT_SIZEOF(trigger_cfg_t, 4 * 4);
 
 typedef struct capture_info {
 	uint32_t n_rep_packets;
 	uint32_t n_rep_packets_before_trigger;
 	uint32_t write_pos;
-} __attribute__((__packed__)) capture_info_t;
+} capture_info_t;
+STATIC_ASSERT_SIZEOF(capture_info_t, 3 * 4);
 
-typedef struct acq_packet {
-	uint16_t state;
-	uint8_t repetitions;
-} __attribute__((__packed__)) acq_packet_t;
-
-typedef struct transfer_packet {
-	acq_packet_t packet[5];
-	uint8_t seq;
-} __attribute__((__packed__)) transfer_packet_t;
+#define TFER_PACKET_N_ACQ  5
+#define TFER_PACKET_SIZE  (TFER_PACKET_N_ACQ * (2 + 1) + 1) /* 5 x (u16 state, u8 n_reps), u8 seq */
 
 typedef struct pwm_setting {
 	uint8_t enabled;
@@ -152,38 +167,18 @@ SR_PRIV int la2016_deinit_device(const struct sr_dev_inst *sdi);
 		inplace_WL32((obj).level);		\
 		inplace_WL32((obj).high_or_falling);	\
 	} while (0)
-#define sample_config_le(obj) do {			\
-		inplace_WL32((obj).sample_depth);	\
-		inplace_WL32((obj).psa);		\
-		inplace_WL16((obj).u1);			\
-		inplace_WL32((obj).u2);			\
-		inplace_WL16((obj).clock_divisor);	\
-	} while (0)
 
 #define capture_info_host(obj) do {					\
 		inplace_RL32((obj).n_rep_packets);			\
 		inplace_RL32((obj).n_rep_packets_before_trigger);	\
 		inplace_RL32((obj).write_pos);				\
 	} while (0)
-#define acq_packet_host(obj)			\
-	inplace_RL16((obj).state)
-#define transfer_packet_host(obj) do {			\
-		acq_packet_host((obj).packet[0]);	\
-		acq_packet_host((obj).packet[1]);	\
-		acq_packet_host((obj).packet[2]);	\
-		acq_packet_host((obj).packet[3]);	\
-		acq_packet_host((obj).packet[4]);	\
-	} while (0)
-
 #else
 /* this host is little-endian, same as device */
 #define pwm_setting_dev_le(obj)   (void)obj
 #define trigger_cfg_le(obj)       (void)obj
-#define sample_config_le(obj)     (void)obj
 
 #define capture_info_host(obj)    (void)obj
-#define acq_packet_host(obj)      (void)obj
-#define transfer_packet_host(obj) (void)obj
 #endif
 
 #endif

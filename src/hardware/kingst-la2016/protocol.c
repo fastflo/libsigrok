@@ -394,13 +394,15 @@ static int set_trigger_config(const struct sr_dev_inst *sdi)
 static int set_sample_config(const struct sr_dev_inst *sdi)
 {
 	struct dev_context *devc;
-	sample_config_t cfg;
+	uint8_t sample_config[4 + 4 + 2 + 4 + 2];
+	uint8_t *wp;
 	double clock_divisor;
 	uint64_t psa;
 	uint64_t total;
 	int ret;
 
 	devc = sdi->priv;
+	wp = sample_config;
 	total = 128 * 1024 * 1024;
 
 	if (devc->cur_samplerate > MAX_SAMPLE_RATE) {
@@ -408,30 +410,29 @@ static int set_sample_config(const struct sr_dev_inst *sdi)
 		return SR_ERR;
 	}
 
-	clock_divisor = MAX_SAMPLE_RATE / (double)devc->cur_samplerate;
+	clock_divisor = round(MAX_SAMPLE_RATE / (double)devc->cur_samplerate);
 	if (clock_divisor > 0xffff)
 		clock_divisor = 0xffff;
-	cfg.clock_divisor = (uint16_t)(clock_divisor + 0.5);
-	devc->cur_samplerate = MAX_SAMPLE_RATE / cfg.clock_divisor;
+	devc->cur_samplerate = MAX_SAMPLE_RATE / clock_divisor;
 
 	if (devc->limit_samples > MAX_SAMPLE_DEPTH) {
 		sr_err("too high sample depth: %" PRIu64, devc->limit_samples);
 		return SR_ERR;
 	}
-	cfg.sample_depth = devc->limit_samples;
 
 	devc->pre_trigger_size = (devc->capture_ratio * devc->limit_samples) / 100;
-
 	psa = devc->pre_trigger_size * 256;
-	cfg.psa = (uint32_t)(psa & 0xffffffff);
-	cfg.u1  = (uint16_t)((psa >> 32) & 0xffff);
-	cfg.u2 = (uint32_t)((total * devc->capture_ratio) / 100);
+
+	write_u32le_inc(&wp, devc->limit_samples);
+	write_u32le_inc(&wp, (uint32_t)(psa & 0xffffffff));
+	write_u16le_inc(&wp, (uint16_t)((psa >> 32) & 0xffff));
+	write_u32le_inc(&wp, (uint32_t)((total * devc->capture_ratio) / 100));
+	write_u16le_inc(&wp, (uint16_t)clock_divisor);
 
 	sr_dbg("set sampling configuration %.0fkHz, %d samples, trigger-pos %d%%",
-	       devc->cur_samplerate/1e3, (unsigned int)cfg.sample_depth, (unsigned int)devc->capture_ratio);
+	       devc->cur_samplerate/1e3, (unsigned int)devc->limit_samples, (unsigned int)devc->capture_ratio);
 
-	sample_config_le(cfg);
-	ret = ctrl_out(sdi, 32, CTRL_SAMPLING, 0, &cfg, sizeof(cfg));
+	ret = ctrl_out(sdi, 32, CTRL_SAMPLING, 0, sample_config, sizeof(sample_config));
 	if (ret != SR_OK) {
 		sr_err("error setting sample config!");
 		return ret;
@@ -573,8 +574,8 @@ SR_PRIV int la2016_start_retrieval(const struct sr_dev_inst *sdi, libusb_transfe
 	if ((ret = get_capture_info(sdi)) != SR_OK)
 		return ret;
 
-	devc->n_transfer_packets_to_read = devc->info.n_rep_packets / 5;
-	devc->n_bytes_to_read = devc->n_transfer_packets_to_read * sizeof(transfer_packet_t);
+	devc->n_transfer_packets_to_read = devc->info.n_rep_packets / TFER_PACKET_N_ACQ;
+	devc->n_bytes_to_read = devc->n_transfer_packets_to_read * TFER_PACKET_SIZE;
 	devc->read_pos = devc->info.write_pos - devc->n_bytes_to_read;
 	devc->n_reps_until_trigger = devc->info.n_rep_packets_before_trigger;
 
