@@ -47,6 +47,7 @@
 #define LA2016_NUM_SAMPLES_MIN  256
 #define LA2016_NUM_SAMPLES_MAX  (10UL * 1000 * 1000 * 1000)
 
+#define RUN_STATE_POLL_INTERVAL_MS 50
 /*
  * stolen from src/dmm/eev121gw.c:
  * Support compile time checks for expected sizeof() results etc, like
@@ -125,7 +126,7 @@ struct dev_context {
 
 	/* state after sampling */
 	int had_triggers_configured;
-	int have_trigger;
+	gboolean have_run_state_poll_source;
 	int transfer_finished;
 	capture_info_t info;
 	unsigned int n_transfer_packets_to_read; /* each with 5 acq packets */

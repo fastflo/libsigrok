@@ -363,13 +363,20 @@ static int dev_open(struct sr_dev_inst *sdi)
 
 static int dev_close(struct sr_dev_inst *sdi)
 {
+	struct dev_context *devc;
 	struct sr_usb_dev_inst *usb;
 
+	devc = sdi->priv;
 	usb = sdi->conn;
 
 	if (!usb->devhdl)
 		return SR_ERR_BUG;
 
+	if (devc->have_run_state_poll_source) {
+		sr_session_source_remove(sdi->session, -1);
+		devc->have_run_state_poll_source = FALSE;
+	}
+	
 	la2016_deinit_device(sdi);
 
 	sr_info("Closing device on %d.%d (logical) / %s (physical) interface %d.",
@@ -610,8 +617,8 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 	sr_dbg("receive_transfer(): status %s received %d bytes.",
 	       libusb_error_name(transfer->status), transfer->actual_length);
 
-	if (transfer->status == LIBUSB_TRANSFER_TIMED_OUT) {
-		sr_err("bulk transfer timeout!");
+	if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
+		sr_err("bulk transfer error: %s", libusb_error_name(transfer->status));
 		devc->transfer_finished = 1;
 	}
 	send_chunk(sdi, transfer->buffer, transfer->actual_length / TFER_PACKET_SIZE);
@@ -651,27 +658,6 @@ static int handle_event(int fd, int revents, void *cb_data)
 	devc = sdi->priv;
 	drvc = sdi->driver->context;
 
-	if (devc->have_trigger == 0) {
-		if (la2016_has_triggered(sdi) == 0) {
-			sr_dbg("not yet ready for download...");
-			return TRUE;
-		}
-		devc->have_trigger = 1;
-		devc->transfer_finished = 0;
-		devc->reading_behind_trigger = 0;
-		devc->total_samples = 0;
-		/* we can start retrieving data! */
-		if (la2016_start_retrieval(sdi, receive_transfer) != SR_OK) {
-			sr_err("failed to start retrieval!");
-			return FALSE;
-		}
-		sr_dbg("retrieval is started...");
-		packet.type = SR_DF_FRAME_BEGIN;
-		sr_session_send(sdi, &packet);
-
-		return TRUE;
-	}
-
 	tv.tv_sec = tv.tv_usec = 0;
 	libusb_handle_events_timeout(drvc->sr_ctx->libusb_ctx, &tv);
 
@@ -692,6 +678,47 @@ static int handle_event(int fd, int revents, void *cb_data)
 	}
 
 	return TRUE;
+}
+
+
+static int poll_run_state(int fd, int revents, void *cb_data)
+{
+	const struct sr_dev_inst *sdi;
+	struct dev_context *devc;
+	struct drv_context *drvc;
+	struct sr_datafeed_packet packet;
+	
+	(void)fd;
+	(void)revents;
+	sdi = cb_data;
+	drvc = sdi->driver->context;
+
+	if (la2016_has_triggered(sdi) == 0) {
+		sr_dbg("not yet ready for download...");
+		return TRUE; /* keep g_timeout */
+	}
+	
+	devc = sdi->priv;
+
+	sr_session_source_remove(sdi->session, -1);
+	devc->have_run_state_poll_source = FALSE;
+
+	devc->transfer_finished = 0;
+	devc->reading_behind_trigger = 0;
+	devc->total_samples = 0;
+	
+	/* we can start retrieving data! */
+	if (la2016_start_retrieval(sdi, receive_transfer) != SR_OK) {
+		sr_err("failed to start retrieval!");
+		return FALSE; /* stop g_timeout */
+	}
+	sr_dbg("retrieval is started...");
+	packet.type = SR_DF_FRAME_BEGIN;
+	sr_session_send(sdi, &packet);
+	
+	usb_source_add(sdi->session, drvc->sr_ctx, 50, handle_event, (void*)sdi);
+
+	return FALSE; /* stop g_timeout */
 }
 
 static void abort_acquisition(struct dev_context *devc)
@@ -754,8 +781,13 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 		return ret;
 	}
 
-	devc->have_trigger = 0;
-	usb_source_add(sdi->session, drvc->sr_ctx, 50, handle_event, (void*)sdi);
+	/* why is there no sr_session_source_add_timeout()? */
+	ret = sr_session_source_add(sdi->session, -1, 0 /* int events */, RUN_STATE_POLL_INTERVAL_MS, poll_run_state, (void*)sdi);
+	if(ret != SR_OK) {
+		sr_err("failed to add timeout-source to poll run_state!");
+		return ret;
+	}
+	devc->have_run_state_poll_source = TRUE;
 
 	std_session_send_df_header(sdi);
 
@@ -764,7 +796,15 @@ static int dev_acquisition_start(const struct sr_dev_inst *sdi)
 
 static int dev_acquisition_stop(struct sr_dev_inst *sdi)
 {
+	struct dev_context *devc;
 	int ret;
+
+	devc = sdi->priv;
+
+	if (devc->have_run_state_poll_source) {
+		sr_session_source_remove(sdi->session, -1);
+		devc->have_run_state_poll_source = FALSE;
+	}
 
 	ret = la2016_abort_acquisition(sdi);
 	abort_acquisition(sdi->priv);
