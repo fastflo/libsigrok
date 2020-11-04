@@ -34,6 +34,7 @@
 
 #define LA2016_VID		0x77a1
 #define LA2016_PID		0x01a2
+#define USB_CONFIGURATION	1
 #define USB_INTERFACE		0
 
 #define LA2016_BULK_MAX         8388608 // todo: make this smaller for MXE build?
