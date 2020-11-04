@@ -36,7 +36,7 @@
 #define LA2016_PID		0x01a2
 #define USB_INTERFACE		0
 
-#define LA2016_BULK_MAX         8388608
+#define LA2016_BULK_MAX         8388608 // todo: make this smaller for MXE build?
 
 #define MAX_RENUM_DELAY_MS	3000
 #define DEFAULT_TIMEOUT_MS      200

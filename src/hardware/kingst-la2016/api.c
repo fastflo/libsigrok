@@ -232,6 +232,14 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 	usb = sdi->conn;
 	ret = SR_ERR;
 
+#if LIBUSB_API_VERSION >= 0x01000106
+	sr_dbg("setting LIBUSB_OPTION_LOG_LEVEL!\n");
+	libusb_set_option(drvc->sr_ctx->libusb_ctx, LIBUSB_OPTION_LOG_LEVEL, LIBUSB_LOG_LEVEL_DEBUG);
+#else
+	sr_dbg("libusb API_VERSION %#x has no LIBUSB_OPTION_LOG_LEVEL!\n", LIBUSB_API_VERSION);
+	libusb_set_debug(drvc->sr_ctx->libusb_ctx, LIBUSB_LOG_LEVEL_DEBUG);
+#endif
+	
 	device_count = libusb_get_device_list(drvc->sr_ctx->libusb_ctx, &devlist);
 	if (device_count < 0) {
 		sr_err("Failed to get device list: %s.", libusb_error_name(device_count));
@@ -618,7 +626,10 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 	       libusb_error_name(transfer->status), transfer->actual_length);
 
 	if (transfer->status != LIBUSB_TRANSFER_COMPLETED) {
-		sr_err("bulk transfer error: %s", libusb_error_name(transfer->status));
+		sr_err("bulk transfer error: %s, strerror: %s, LIBUSB_API_VERSION: %#x",
+		       libusb_error_name(transfer->status),
+		       libusb_strerror(transfer->status),
+		       LIBUSB_API_VERSION);
 		devc->transfer_finished = 1;
 	}
 	send_chunk(sdi, transfer->buffer, transfer->actual_length / TFER_PACKET_SIZE);
@@ -633,8 +644,10 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 			0x86, transfer->buffer, to_read,
 			receive_transfer, (void*)sdi, DEFAULT_TIMEOUT_MS);
 
-		if ((ret = libusb_submit_transfer(transfer)) == 0)
+		if ((ret = libusb_submit_transfer(transfer)) == 0) {
+			sr_dbg("...receive_transfer() did submit another transfer"); // todo: remove
 			return;
+		}
 		sr_err("Failed to submit further transfer: %s.", libusb_error_name(ret));
 	}
 
@@ -659,7 +672,9 @@ static int handle_event(int fd, int revents, void *cb_data)
 	drvc = sdi->driver->context;
 
 	tv.tv_sec = tv.tv_usec = 0;
+	sr_dbg("calling libusb_handle_events_timeout..."); // todo: remove
 	libusb_handle_events_timeout(drvc->sr_ctx->libusb_ctx, &tv);
+	sr_dbg("...libusb_handle_events_timeout returned"); // todo: remove
 
 	if (devc->transfer_finished) {
 		sr_dbg("transfer is finished!");
