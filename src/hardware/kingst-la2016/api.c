@@ -226,6 +226,7 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 	struct drv_context *drvc;
 	int ret, i, device_count;
 	char connection_id[64];
+	int config;
 
 	di = sdi->driver;
 	drvc = di->context;
@@ -277,6 +278,25 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 			break;
 		}
 
+		ret = libusb_get_configuration(usb->devhdl, &config);
+		if (ret != 0) {
+			sr_err("Unable to get USB configuration: %s", libusb_error_name(ret));
+			ret = SR_ERR;
+			break;
+		}
+		if (config != USB_CONFIGURATION) {
+			sr_err("device is in configuration %d, switching to %d", config, USB_CONFIGURATION);
+			
+			ret = libusb_set_configuration(usb->devhdl, USB_CONFIGURATION);
+			if (ret != 0) {
+				sr_err("failed to switch USB configuration from %d to %d: %s", config,
+				       USB_CONFIGURATION, libusb_error_name(ret));
+				ret = SR_ERR;
+				break;
+			}
+		} else
+			sr_dbg("device was already in configuration %d", config);
+		
 		ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
 		if (ret == LIBUSB_ERROR_BUSY) {
 			sr_err("Unable to claim USB interface. Another "
