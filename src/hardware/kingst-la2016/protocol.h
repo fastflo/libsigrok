@@ -40,7 +40,7 @@
 #define LA2016_BULK_MAX         8388608 // todo: make this smaller for MXE build?
 
 #define MAX_RENUM_DELAY_MS	3000
-#define DEFAULT_TIMEOUT_MS      200
+#define DEFAULT_TIMEOUT_MS      2000
 
 #define LA2016_THR_VOLTAGE_MIN  0.40
 #define LA2016_THR_VOLTAGE_MAX  4.00
