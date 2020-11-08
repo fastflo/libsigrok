@@ -227,11 +227,19 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 	int ret, i, device_count;
 	char connection_id[64];
 	int config;
-
+	char* force_config_str;
+	gboolean force_config = FALSE;
+	
 	di = sdi->driver;
 	drvc = di->context;
 	usb = sdi->conn;
 	ret = SR_ERR;
+
+	force_config_str = getenv("SR_FORCE_CONFIG");
+	if (force_config_str && force_config_str[0] == '1') {
+		sr_err("SR_FORCE_CONFIG was set!\n");
+		force_config = TRUE;
+	}
 
 #if LIBUSB_API_VERSION >= 0x01000106
 	sr_dbg("setting LIBUSB_OPTION_LOG_LEVEL!\n");
@@ -280,22 +288,22 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 
 		ret = libusb_get_configuration(usb->devhdl, &config);
 		if (ret != 0) {
-			sr_err("Unable to get USB configuration: %s", libusb_error_name(ret));
+			sr_err("Unable to get USB configuration: %s\n", libusb_error_name(ret));
 			ret = SR_ERR;
 			break;
 		}
-		if (config != USB_CONFIGURATION) {
-			sr_err("device is in configuration %d, switching to %d", config, USB_CONFIGURATION);
+		if (config != USB_CONFIGURATION || force_config) {
+			sr_err("device is in configuration %d, switching to %d\n", config, USB_CONFIGURATION);
 			
 			ret = libusb_set_configuration(usb->devhdl, USB_CONFIGURATION);
 			if (ret != 0) {
-				sr_err("failed to switch USB configuration from %d to %d: %s", config,
+				sr_err("failed to switch USB configuration from %d to %d: %s\n", config,
 				       USB_CONFIGURATION, libusb_error_name(ret));
 				ret = SR_ERR;
 				break;
 			}
 		} else
-			sr_dbg("device was already in configuration %d", config);
+			sr_dbg("device was already in configuration %d\n", config);
 		
 		ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
 		if (ret == LIBUSB_ERROR_BUSY) {
