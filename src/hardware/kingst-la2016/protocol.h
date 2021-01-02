@@ -37,6 +37,7 @@
 #define USB_CONFIGURATION	1
 #define USB_INTERFACE		0
 
+#define LA2016_BULK_IN_EP       0x86
 #define LA2016_BULK_MAX         8388608 // todo: make this smaller for MXE build?
 
 #define MAX_RENUM_DELAY_MS	3000

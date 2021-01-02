@@ -217,6 +217,51 @@ static GSList *scan(struct sr_dev_driver *di, GSList *options)
 	return std_scan_complete(di, devices);
 }
 
+static int describe_active_configuration(libusb_device *dev)
+{
+	int ret;
+	struct libusb_config_descriptor *config_des;
+	unsigned int i, e;
+	int a;
+	gboolean found_bulk_in_ep = FALSE;
+	
+	ret = libusb_get_active_config_descriptor(dev, &config_des);
+	if (ret != 0) {
+		sr_err("Unable to get active configuration descriptor!");
+		return SR_ERR;
+	}
+	
+	sr_dbg("number of interfaces from active-config-descriptor: %d", config_des->bNumInterfaces);
+	for (i = 0; i < config_des->bNumInterfaces; i++) {
+		const struct libusb_interface *intf = config_des->interface + i;
+		sr_dbg("  interface %d num_altsetting: %d", i, intf->num_altsetting);
+		for (a = 0; a < intf->num_altsetting; a++) {
+			const struct libusb_interface_descriptor *as = intf->altsetting + a;
+			sr_dbg("    altsetting %d", a);
+			sr_dbg("      interface number: %d, alternate setting %d", as->bInterfaceNumber, as->bAlternateSetting);
+			sr_dbg("      number of endpoints: %d", as->bNumEndpoints);
+			for (e = 0; e < as->bNumEndpoints; e++) {
+				const struct libusb_endpoint_descriptor *ep = as->endpoint + e;
+				sr_dbg("        endpoint %d", e);
+				sr_dbg("          address %#x", ep->bEndpointAddress);
+				sr_dbg("          max packet size %d", ep->wMaxPacketSize);
+
+				if (as->bInterfaceNumber == USB_INTERFACE && ep->bEndpointAddress == LA2016_BULK_IN_EP)
+					found_bulk_in_ep = TRUE;
+			}
+		}
+	}
+	libusb_free_config_descriptor(config_des);
+
+	if (found_bulk_in_ep == FALSE) {
+		sr_err("could not find bulk-in endpoint %#x!", LA2016_BULK_IN_EP);
+		return SR_ERR;
+	}
+	
+	return SR_OK;
+}
+
+
 static int la2016_dev_open(struct sr_dev_inst *sdi)
 {
 	struct sr_dev_driver *di;
@@ -304,6 +349,12 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 			}
 		} else
 			sr_dbg("device was already in configuration %d\n", config);
+
+		ret = describe_active_configuration(devlist[i]);
+		if (ret != SR_OK) {
+			ret = SR_ERR;
+			break;
+		}
 		
 		ret = libusb_claim_interface(usb->devhdl, USB_INTERFACE);
 		if (ret == LIBUSB_ERROR_BUSY) {
@@ -317,6 +368,14 @@ static int la2016_dev_open(struct sr_dev_inst *sdi)
 			break;
 		} else if (ret != 0) {
 			sr_err("Unable to claim interface: %s.", libusb_error_name(ret));
+			ret = SR_ERR;
+			break;
+		}
+
+		/** todo: maybe call this helps windows libusb? */
+		ret = libusb_set_interface_alt_setting(usb->devhdl, USB_INTERFACE, 0);
+		if (ret != 0) {
+			sr_err("failed to set interface alternate-setting: %d", ret);
 			ret = SR_ERR;
 			break;
 		}
@@ -669,7 +728,7 @@ static void LIBUSB_CALL receive_transfer(struct libusb_transfer *transfer)
 			to_read = LA2016_BULK_MAX;
 		libusb_fill_bulk_transfer(
 			transfer, usb->devhdl,
-			0x86, transfer->buffer, to_read,
+			LA2016_BULK_IN_EP, transfer->buffer, to_read,
 			receive_transfer, (void*)sdi, DEFAULT_TIMEOUT_MS);
 
 		if ((ret = libusb_submit_transfer(transfer)) == 0) {

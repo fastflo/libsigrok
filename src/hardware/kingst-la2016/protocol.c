@@ -611,7 +611,7 @@ SR_PRIV int la2016_start_retrieval(const struct sr_dev_inst *sdi, libusb_transfe
 	devc->transfer = libusb_alloc_transfer(0);
 	libusb_fill_bulk_transfer(
 		devc->transfer, usb->devhdl,
-		0x86, buffer, to_read,
+		LA2016_BULK_IN_EP, buffer, to_read,
 		cb, (void *)sdi, DEFAULT_TIMEOUT_MS);
 
 	if ((ret = libusb_submit_transfer(devc->transfer)) != 0) {
